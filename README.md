@@ -1,1 +1,1 @@
-# etl-core
+# ETL Rust (was etl-core)
