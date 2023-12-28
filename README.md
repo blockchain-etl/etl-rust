@@ -10,28 +10,5 @@ All blockchain-specific details (HTTP request and response formats, indexing alg
 
 For more information, please check the [documentation](/docs/).
 
-# Setup
-Use the script in `scripts/setup.sh` to automatically install system dependencies, clone the repo and all submodules, and compile:
--  Tested on Ubuntu LTS 22.04
-```
-bash scripts/setup.sh
-```
-NOTE: you may need to run with `sudo`.
-
-Next, build and run the development profile (default) with appropriate features:
-
-E.g. to index Solana and output to Google Pub/Sub, replace `<BLOCKCHAIN>` with `SOLANA` and `<OUTPUT_TYPE>` with `GOOGLE_PUBSUB`:
-
-`cargo build --features <BLOCKCHAIN>,<OUTPUT_TYPE>`
-
-Finally, execute with the appropriate function and parameters.
-
-E.g. Index starting from genesis onwards:
-
-`./target/debug/blockchain_etl_indexer index-range stream 0`
-
-Or to index from genesis to block 10:
-`./target/debug/blockchain_etl_indexer index-range stream 0 10`
-
-And to index a list of specific blocks, provide a CSV filepath with `index-list` command:
-`./target/debug/blockchain_etl_indexer index-list stream FILE_PATH.csv`
+# Develop
+This repository is intended to provide code for ETL developers; the code in this repo will not compile on its own. Instead, you will need to create a blockchain configuration in the `src` directory. See [the documentation](/docs/develop.md) for more details.
