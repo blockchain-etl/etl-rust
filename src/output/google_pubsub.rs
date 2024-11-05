@@ -7,6 +7,9 @@ use log::warn;
 use std::time;
 use tokio::time::sleep;
 
+#[cfg(feature = "APACHE_AVRO")]
+use crate::blockchain_config::avro_helpers::{env_key_to_table_name, table_to_avro};
+
 use google_cloud_auth::credentials::CredentialsFile;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::{
@@ -16,6 +19,7 @@ use google_cloud_pubsub::{
 
 use prost::Message;
 
+use super::environment::*;
 use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient};
 
 /// Establishes the connection to the Google Cloud Pub/Sub extracting the credentials
@@ -24,33 +28,27 @@ use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient}
 /// Must have the `GCP_CREDENTIAL_JSON_PATH` filepath pointing to the credentials json file,
 /// and have `GOOGLE_PUBSUB_TOPIC` string saved in the .env file.
 pub async fn connect(queue_name: &str) -> StreamPublisherConnection {
-    let gcp_credentials_file = {
-        let gcp_credentials_json_path = dotenvy::var("GCP_CREDENTIALS_JSON_PATH")
-            .expect("GCP_CREDENTIALS_JSON_PATH should exist in .env file")
-            .parse::<String>()
-            .unwrap();
-
-        CredentialsFile::new_from_file(gcp_credentials_json_path)
-            .await
-            .expect("GCP credentials file exists")
+    let gcp_config = {
+        match get_gcp_credentials_json_path() {
+            Some(key_path) => {
+                let cred_file = CredentialsFile::new_from_file(key_path.to_owned())
+                    .await
+                    .expect("GCP credentials file exists");
+                // authenticate using the key file
+                ClientConfig::default()
+                    .with_credentials(cred_file)
+                    .await
+                    .unwrap()
+            }
+            None => ClientConfig::default().with_auth().await.unwrap(),
+        }
     };
-
-    let topic_name = dotenvy::var(queue_name)
-        .unwrap_or_else(|_| panic!("{} should exist in .env file", queue_name))
-        .parse::<String>()
-        .unwrap();
-
-    // Attempt to open the credentials file to create the configuration
-    let gcp_config = ClientConfig::default()
-        .with_credentials(gcp_credentials_file)
-        .await
-        .unwrap();
 
     // Attempt to create the client using the configuration from above
     let gcp_client = Client::new(gcp_config).await.unwrap();
 
     // Use the client to connect to the specific topic.
-    connect_to_topic(gcp_client.clone(), &topic_name).await
+    connect_to_topic(gcp_client.clone(), queue_name).await
 }
 
 /// Establishes a connection to the Google Cloud Pub/Sub Topic.  Assumes that the
@@ -62,6 +60,15 @@ async fn connect_to_topic(
     gcp_client: google_cloud_pubsub::client::Client,
     topic_name: &str,
 ) -> StreamPublisherConnection {
+    // TODO: the name of the avro schema file may be retrievable from the `topic_name` argument, but keep in mind that `topic name` is the env var (like all caps)
+    // maybe we should have some sort of macro or enum to map from table->topic ENV var, or table->schema.
+    #[cfg(feature = "APACHE_AVRO")]
+    let avro_schema = {
+        let table_name = env_key_to_table_name(topic_name);
+        let avro_schema_str = table_to_avro(table_name);
+        apache_avro::Schema::parse_str(avro_schema_str).unwrap()
+    };
+
     let google_pubsub_topic = dotenvy::var(topic_name)
         .expect("GOOGLE_PUBSUB_TOPIC should exist in .env file")
         .parse::<String>()
@@ -71,7 +78,10 @@ async fn connect_to_topic(
     let topic = gcp_client.topic(&google_pubsub_topic);
 
     if !topic.exists(None).await.unwrap() {
-        panic!("Topic {} doesn't exist! Terminating...", topic_name);
+        panic!(
+            "Topic {} doesn't exist! Terminating...",
+            google_pubsub_topic
+        );
     } else {
         info!("Topic exists. Proceeding...");
     }
@@ -79,6 +89,8 @@ async fn connect_to_topic(
     StreamPublisherConnection {
         client: StreamPublisherConnectionClient::GcpPubSub(publisher),
         queue_name: topic_name.to_string(),
+        #[cfg(feature = "APACHE_AVRO")]
+        schema: avro_schema,
     }
 }
 
@@ -159,7 +171,20 @@ async fn publish_batch_with_backoff(publisher: &Publisher, messages: Vec<PubsubM
 }
 
 impl StreamPublisherConnection {
-    /// Sends the message to the client
+    /// Publish the message to Pub/Sub as an Apache Avro message.
+    #[cfg(feature = "APACHE_AVRO")]
+    pub async fn publish<T: serde::Serialize>(&self, msg: T) {
+        let mut writer = apache_avro::Writer::new(&self.schema, Vec::new());
+        writer
+            .append_ser(msg)
+            .expect("protobuf schema matches avro schema");
+        let encoded = writer.into_inner().unwrap();
+
+        self.client.publish(encoded).await;
+    }
+
+    /// Publish the message to Pub/Sub as a Protocol Buffers message.
+    #[cfg(not(feature = "APACHE_AVRO"))]
     pub async fn publish<T: Message>(&self, msg: T) {
         self.client.publish(msg.encode_to_vec()).await;
     }
@@ -170,7 +195,6 @@ impl StreamPublisherConnection {
             .await;
     }
 
-    /// Sends the message to the client
     pub async fn disconnect(mut self) {
         self.client.disconnect().await;
     }
