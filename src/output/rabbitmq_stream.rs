@@ -11,6 +11,7 @@ use log::info;
 use rabbitmq_stream_client::types::Message;
 
 // local imports
+use super::environment::*;
 use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient};
 
 impl StreamPublisherConnectionClient {
@@ -48,17 +49,11 @@ impl StreamPublisherConnectionClient {
 /// for the queue.
 pub async fn connect(queue_name: &str) -> StreamPublisherConnection {
     // Extract values from the .env
-    let rabbitmq_address = dotenvy::var("RABBITMQ_ADDRESS")
-        .expect("RABBITMQ_ADDRESS should exist in .env file")
-        .parse::<String>()
-        .unwrap();
-    let rabbitmq_port = dotenvy::var("RABBITMQ_PORT")
-        .expect("RABBITMQ_PORT should exist in .env file")
-        .parse::<u16>()
-        .unwrap();
+    let rabbitmq_address = get_rabbitmq_addr();
+    let rabbitmq_port = get_rabbitmq_port();
     let rabbitmq_environment = rabbitmq_stream_client::Environment::builder()
         .host(&rabbitmq_address)
-        .port(rabbitmq_port)
+        .port(*rabbitmq_port)
         .build()
         .await
         .expect("FATAL: could not create rabbitmq environment");
@@ -66,6 +61,7 @@ pub async fn connect(queue_name: &str) -> StreamPublisherConnection {
         .unwrap_or_else(|_| panic!("{} should exist in .env file", queue_name))
         .parse::<String>()
         .unwrap();
+
     info!("Successfully created the rabbitmq environment");
 
     // this will cause a panic if the stream HAS been created:

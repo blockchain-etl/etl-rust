@@ -1,0 +1,83 @@
+syntax = "proto2";
+import "common.proto";
+
+package aptos.modules;
+
+// import "common.proto";
+
+/// Represents a singular module output record
+message Module {
+    // Modules that are similar
+    message Friend {
+        required string address = 1;
+        required string name = 2;
+    }
+
+    // Represents the different abilities that can be applied, should be mapped from a similar enum in aptos-protos
+    enum MoveAbility {
+        Copy = 1;
+        Drop = 2;
+        Store = 3;
+        Key = 4;
+    }
+
+    // Exposed functions in the module abi
+    message ExposedFunction {
+
+        // Contains the ability constraints applied to the params
+        message GenericFunctionTypeParams {
+            // The ability constraints
+            repeated string constraints = 1;
+        }
+
+        // The name of the exposed function
+        required string name = 1;
+        // the visibility of the function, should be mapped from a similar enum in aptos-protos
+        required string visibility = 2;
+        required bool is_entry = 3;
+        repeated GenericFunctionTypeParams generic_type_params = 5;
+        repeated string params = 6;
+        repeated string return = 7;
+    }
+
+    // Structs in the module abi
+    message Struct {
+
+        // Contains the ability constraints applied to the params
+        message GenericStructTypeParams {
+            // The ability constraints
+            repeated string constraints = 1;
+            // Phantom
+            required bool is_phantom = 2;
+        }
+
+        // Individual fields in the struct
+        message Fields {
+            // Name of the field
+            required string name = 1;
+            // String representing the type of the field
+            required string type = 2;
+        }
+
+        // The name of the struct
+        required string name = 1;
+        required bool is_native = 2;
+        repeated string abilities = 3;
+        repeated GenericStructTypeParams generic_type_params = 4;
+        repeated Fields fields = 5;
+    }
+
+    required int64 block_height = 1;
+    required string block_timestamp = 2;
+    required uint64 tx_version = 3;
+    required string tx_hash = 4;
+    required uint64 change_index = 5;
+    optional string bytecode = 6;
+    required string address = 7;
+    optional string name = 8;
+    repeated Friend friends = 9;
+    repeated ExposedFunction exposed_functions = 10;
+    repeated Struct structs = 11;
+    required aptos.common.UnixTimestamp block_unixtimestamp = 12;
+
+}

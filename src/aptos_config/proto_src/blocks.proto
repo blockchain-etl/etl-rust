@@ -1,0 +1,15 @@
+syntax = "proto2";
+
+import "common.proto";
+package aptos.blocks;
+
+message Block {
+    required string block_hash = 1;
+    required string block_timestamp = 2;
+    required int64 block_height = 3;
+    required uint64 round = 4;
+    required string previous_block_votes_bitvec = 5;
+    required string proposer = 6;
+    required uint64 blockmetadata_tx_version = 7;
+    required aptos.common.UnixTimestamp block_unixtimestamp = 8;
+}

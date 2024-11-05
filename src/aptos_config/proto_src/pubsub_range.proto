@@ -1,0 +1,30 @@
+syntax = "proto3";
+package aptos.pubsub_range;
+
+// TableOptions contain possible output tables.  Each
+// field consists of a boolean and is optional.  If not
+// provided, it should be assumed that it is disabled.
+message TableOptions {
+
+  optional bool blocks = 1;
+  optional bool transactions = 2;
+  optional bool events = 3;
+  optional bool changes = 4;
+  optional bool modules = 5;
+  optional bool table_items = 6;
+  optional bool resource = 7;
+  optional bool signatures = 8;
+
+}
+
+message IndexingRange {
+
+  uint64 start = 1;
+  uint64 end = 2;
+
+  // TableOptions is an optional argument enabling you
+  // to specify which tables should output records.
+  //
+  // If not provided, the assumption is ALL tables
+  optional TableOptions table = 3;
+}

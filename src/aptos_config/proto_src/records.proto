@@ -1,0 +1,22 @@
+syntax = "proto3";
+package aptos.records;
+
+import "blocks.proto";
+import "changes.proto";
+import "events.proto";
+import "modules.proto";
+import "resources.proto";
+import "signatures.proto";
+import "table_items.proto";
+import "transactions.proto";
+
+message Records {
+    repeated aptos.blocks.Block blocks = 1;
+    repeated aptos.transactions.Transaction transactions = 2;
+    repeated aptos.table_items.TableItem table_items = 3;
+    repeated json.resources.Resource resources = 4;
+    repeated aptos.modules.Module modules = 5;
+    repeated aptos.changes.Change changes = 6;
+    repeated json.events.Event events = 7;
+    repeated aptos.signatures.Signature signatures = 8;
+}

@@ -1,0 +1,11 @@
+syntax = "proto2";
+
+package json;
+
+// The json object string
+//
+// When serializing, should be serialized as an json object string, not a json string value
+message JsonObjectString {
+    // The Json String stored in this
+    required string jsonstr = 1;
+}

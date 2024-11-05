@@ -1,0 +1,19 @@
+// Resources Extras is the extra material used in the Resources message.  These are stored separately
+// since Resources was placed in a the json package in order to allow custom 
+// serialization/deserialization
+syntax = "proto2";
+package aptos.resource_extras;
+
+
+// Subsection of ChangeType, but only those relating to resources
+enum ResourceChangeType {
+    delete_resource = 1;
+    write_resource = 2;
+}
+
+message StructTag {
+    required string address = 1;
+    required string module = 2;
+    required string name = 3;
+    repeated string generic_type_params = 4;
+}

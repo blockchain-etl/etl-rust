@@ -1,0 +1,21 @@
+syntax = "proto2";
+import "common.proto";
+// import "json.proto";
+package json.resources;
+import "resources_extras.proto";
+
+message Resource {
+    required int64 block_height = 1;
+    required string block_timestamp = 2;
+    required uint64 tx_version = 3;
+    required string tx_hash = 4;
+    optional uint64 tx_sequence_number = 5;
+    required uint64 change_index = 6;
+    required string address = 7;
+    required string state_key_hash = 8;
+    required string change_type = 9;
+    optional aptos.resource_extras.StructTag struct_tag = 10;
+    required string type_str = 11;
+    optional string resource = 12;
+    required aptos.common.UnixTimestamp block_unixtimestamp = 13;
+    }

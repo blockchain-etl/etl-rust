@@ -1,0 +1,69 @@
+syntax = "proto2";
+
+import "common.proto";
+
+package aptos.signatures;
+
+
+message Signature {
+    
+    enum SignatureBuildType {
+        ed25519 = 1;
+        multi_ed25519 = 2;
+        multi_agent = 3;
+        fee_payer = 4;
+        single_sender = 5;
+    }
+
+    message PublicKey {
+
+        enum PublicKeyType {
+            unspecified = 1;
+            ed25519 = 2;
+            secp256k1_ecdsa = 3;
+            secp256r1_ecdsa = 4;
+            keyless = 5;
+        }
+
+        required string type = 1;
+        required string value = 2;
+        optional uint32 index = 3;
+    }
+
+    message Signature {
+
+        enum SignatureType {
+            unspecified = 1;
+            ed25519 = 2;
+            secp256k1_ecdsa = 3;
+            webauthn = 4;
+            zkid = 5;
+            keyless = 6;
+        }
+
+        required string type = 1;
+        required string value = 2;
+        optional uint32 index = 3;
+    }
+
+    required int64 block_height = 1;
+    required string block_timestamp = 2;
+
+    required uint64 tx_version = 3;
+    required string tx_hash = 4;
+
+    optional uint32 threshold = 5;
+
+    optional bool is_secondary = 6;
+    optional bool is_fee_payer = 7;
+    optional bool is_sender = 8;
+
+    optional Signature signature = 9;
+    required PublicKey public_key = 10;
+
+    required string build_type = 11;
+
+    required string signer = 12;
+
+    required aptos.common.UnixTimestamp block_unixtimestamp = 13;
+}

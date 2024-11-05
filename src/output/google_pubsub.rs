@@ -16,6 +16,7 @@ use google_cloud_pubsub::{
 
 use prost::Message;
 
+use super::environment::*;
 use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient};
 
 /// Establishes the connection to the Google Cloud Pub/Sub extracting the credentials
@@ -24,33 +25,27 @@ use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient}
 /// Must have the `GCP_CREDENTIAL_JSON_PATH` filepath pointing to the credentials json file,
 /// and have `GOOGLE_PUBSUB_TOPIC` string saved in the .env file.
 pub async fn connect(queue_name: &str) -> StreamPublisherConnection {
-    let gcp_credentials_file = {
-        let gcp_credentials_json_path = dotenvy::var("GCP_CREDENTIALS_JSON_PATH")
-            .expect("GCP_CREDENTIALS_JSON_PATH should exist in .env file")
-            .parse::<String>()
-            .unwrap();
-
-        CredentialsFile::new_from_file(gcp_credentials_json_path)
-            .await
-            .expect("GCP credentials file exists")
+    let gcp_config = {
+        match get_gcp_credentials_json_path() {
+            Some(key_path) => {
+                let cred_file = CredentialsFile::new_from_file(key_path.to_owned())
+                    .await
+                    .expect("GCP credentials file exists");
+                // authenticate using the key file
+                ClientConfig::default()
+                    .with_credentials(cred_file)
+                    .await
+                    .unwrap()
+            }
+            None => ClientConfig::default().with_auth().await.unwrap(),
+        }
     };
-
-    let topic_name = dotenvy::var(queue_name)
-        .unwrap_or_else(|_| panic!("{} should exist in .env file", queue_name))
-        .parse::<String>()
-        .unwrap();
-
-    // Attempt to open the credentials file to create the configuration
-    let gcp_config = ClientConfig::default()
-        .with_credentials(gcp_credentials_file)
-        .await
-        .unwrap();
 
     // Attempt to create the client using the configuration from above
     let gcp_client = Client::new(gcp_config).await.unwrap();
 
     // Use the client to connect to the specific topic.
-    connect_to_topic(gcp_client.clone(), &topic_name).await
+    connect_to_topic(gcp_client.clone(), queue_name).await
 }
 
 /// Establishes a connection to the Google Cloud Pub/Sub Topic.  Assumes that the
@@ -71,7 +66,10 @@ async fn connect_to_topic(
     let topic = gcp_client.topic(&google_pubsub_topic);
 
     if !topic.exists(None).await.unwrap() {
-        panic!("Topic {} doesn't exist! Terminating...", topic_name);
+        panic!(
+            "Topic {} doesn't exist! Terminating...",
+            google_pubsub_topic
+        );
     } else {
         info!("Topic exists. Proceeding...");
     }
@@ -170,7 +168,6 @@ impl StreamPublisherConnection {
             .await;
     }
 
-    /// Sends the message to the client
     pub async fn disconnect(mut self) {
         self.client.disconnect().await;
     }

@@ -1,0 +1,91 @@
+syntax = "proto2";
+
+package aptos.transactions;
+
+import "common.proto";
+import "modules.proto";
+
+message Transaction {
+
+    enum TxType {
+        user = 1;
+        genesis = 2;
+        block_metadata = 3;
+        state_checkpoint = 4;
+        validator = 5;
+        block_epilogue = 6;
+    }
+
+    enum PayloadType {
+        entry_function = 1;
+        script = 2;
+        module_bundle = 3;
+        multisig = 4;
+        writeset = 5;
+        genesis_writeset = 6;
+    }
+
+    message ChangesAggregate {
+        required uint64 total = 1;
+        required uint64 delete_module = 2;
+        required uint64 delete_resource = 3;
+        required uint64 delete_table_item = 4;
+        required uint64 write_module = 5;
+        required uint64 write_resource = 6;
+        required uint64 write_table_item = 7;
+    }
+
+    message Payload {
+
+        message Code {
+            required string bytecode = 1;
+            optional aptos.modules.Module.ExposedFunction abi = 2;
+        }
+
+        message TxPayload {
+            required string function = 1;
+            repeated string type_arguments = 2;
+            repeated string arguments = 3;
+        }
+
+        message Module {
+            required string address = 1;
+            required string name = 2;
+        }
+
+        optional string function = 2;
+        repeated string type_arguments = 3;
+        repeated string arguments = 4;
+        optional string execute_as = 5;
+        optional string entry_function_id_str = 6;
+        optional Code code = 7;
+        optional string multisig_address = 8;
+
+    }
+
+    required int64 block_height = 1;
+    required string block_timestamp = 2;
+    required string tx_type = 3;
+    required uint64 tx_version = 4;
+    required string tx_hash = 5;
+    required string state_change_hash = 6;
+    required string event_root_hash = 7;
+    optional string state_checkpoint_hash = 8;
+    required uint64 gas_used = 9;
+    required bool success = 10;
+    optional string vm_status = 11;
+    optional string accumulator_root_hash = 12;
+    optional uint64 sequence_number = 13;
+    optional uint64 max_gas_amount = 14;
+    optional string sender = 15;
+    optional uint64 num_events = 16;
+    required ChangesAggregate num_changes = 17;
+    optional string expiration_timestamp = 18;
+    optional Payload payload = 19;
+    optional uint64 gas_unit_price = 20;
+    optional string payload_type = 21;
+    required aptos.common.UnixTimestamp block_unixtimestamp = 22;
+    optional aptos.common.UnixTimestamp expiration_unixtimestamp = 23;
+    optional uint64 num_signatures = 24;
+
+    }

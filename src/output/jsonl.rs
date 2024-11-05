@@ -10,15 +10,13 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 
+use super::environment::*;
 use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient};
 
 /// Opens the connection to a JSONL file.
 pub async fn connect(queue_env: &str) -> StreamPublisherConnection {
     // Get expected output directory as a string
-    let output_dir_string = dotenvy::var("OUTPUT_DIR")
-        .expect("OUTPUT_DIR should exist in .env file")
-        .parse::<String>()
-        .unwrap();
+    let output_dir_string = get_output_dir();
 
     // transform it into a path object
     let mut output_dir = PathBuf::new();
@@ -46,11 +44,11 @@ impl StreamPublisherConnectionClient {
 
         let StreamPublisherConnectionClient::JsonL(directory) = self;
         // Create an example filepath
-        let mut filepath = directory.join(String::from(filename) + ".jsonl");
+        let filepath = directory.join(String::from(filename) + ".jsonl");
         // Recreate the filepath
-        while filepath.exists() {
-            filepath = directory.join(String::from(filename) + ".jsonl");
-        }
+        // while filepath.exists() {
+        //     filepath = directory.join(String::from(filename) + ".jsonl");
+        // }
 
         // Create and append to the file
         let mut file = OpenOptions::new()
@@ -66,6 +64,8 @@ impl StreamPublisherConnectionClient {
     }
 
     /// Publish a prost message to the JSON file
+    // NOTE: this is intended to be used in cases where a block/transaction has only generated a single record for a table.
+    //  for example, a single Solana block generates a single record for the Blocks table. This is why it creates a .json file.
     #[inline]
     pub async fn publish<T: Serialize + Message>(&self, name: &str, msg: T) {
         let StreamPublisherConnectionClient::JsonL(directory) = self;
@@ -79,6 +79,7 @@ impl StreamPublisherConnectionClient {
         // Create and append to the file
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(filepath)
             .expect("Failed to open file");

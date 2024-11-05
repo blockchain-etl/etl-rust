@@ -1,0 +1,28 @@
+syntax = "proto2";
+import "common.proto";
+
+package aptos.changes;
+
+message Change {
+
+    enum ChangeType {
+        delete_module = 1;
+        delete_resource = 2;
+        delete_table_item = 3;
+        write_module = 4;
+        write_resource = 5;
+        write_table_item = 6;
+    }
+
+    required int64 block_height = 1;
+    required string block_timestamp = 2;
+    required uint64 tx_version = 3;
+    required string tx_hash = 4;
+    optional uint64 tx_sequence_number = 5;
+    required uint64 change_index = 6;
+    required string change_type = 7;
+    optional string address = 8;
+    required string state_key_hash = 9;
+    required aptos.common.UnixTimestamp block_unixtimestamp = 10;
+
+}

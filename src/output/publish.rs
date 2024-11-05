@@ -3,13 +3,16 @@
 //! the structs and functions provided in this module regardless of the comilation
 //! features enabled.
 
-// Import the StreamPublisher.  Should either be the single_stream_publisher or a blockchain specific one
 #[cfg(feature = "SINGLE_PUBLISHER")]
 pub use super::single_stream_publisher::StreamPublisher;
-#[cfg(all(feature = "SEPARATE_PUBLISHERS", feature = "SOLANA"))]
-pub use crate::solana_config::streampublisher::StreamPublisher;
+
+// This needs to be defined by the blockchain config due to using the names of the tables to identify each publisher.
+#[cfg(feature = "SEPARATE_PUBLISHERS")]
+pub use crate::blockchain_config::streampublisher::StreamPublisher;
 
 // Get the appropriate connect
+#[cfg(feature = "APACHE_KAFKA")]
+pub use super::apache_kafka::connect;
 #[cfg(feature = "GOOGLE_PUBSUB")]
 pub use super::google_pubsub::connect;
 #[cfg(feature = "JSON")]
@@ -27,6 +30,12 @@ pub use super::rabbitmq_stream::connect;
 pub enum StreamPublisherConnectionClient {
     #[cfg(feature = "GOOGLE_PUBSUB")]
     GcpPubSub(google_cloud_pubsub::publisher::Publisher),
+    #[cfg(feature = "GOOGLE_CLOUD_STORAGE")]
+    GcsBucket(google_cloud_storage::client::Client),
+    #[cfg(feature = "APACHE_KAFKA")]
+    ApacheKafka(
+        std::sync::Arc<rskafka::client::partition::PartitionClient>, // /*rskafka::client::producer::BatchProducer<rskafka::client::producer::aggregator::RecordAggregator,>,
+    ),
     #[cfg(feature = "RABBITMQ_CLASSIC")]
     RabbitMQClassic(amqprs::connection::Connection),
     #[cfg(feature = "RABBITMQ_STREAM")]
@@ -38,7 +47,7 @@ pub enum StreamPublisherConnectionClient {
 }
 
 /// A struct that contains the client used to connect to the publisher and the queue_name
-#[derive(Clone)]
+//#[derive(Clone)]
 pub struct StreamPublisherConnection {
     /// The `client` is an Enum with a singular item depending on the enabled features that
     /// contain the functionality of publishing
@@ -46,9 +55,29 @@ pub struct StreamPublisherConnection {
     /// The `queue_name` is a string to represent the output stream.  This would be things like
     /// the google pubsub topic, the rabbitmq queue or stream name, etc.
     pub queue_name: String,
-    /// Channel is only compiled when `RABBITMQ_CLASSIC` feature is enabled.  It is Optional as
-    /// you cannot create a Channel and utilize it in a different thread.  You should create a
-    /// a Channel for this publisher once you are in the thread you intend to use the publisher in.
+
+    /// Not thread-safe. Needs to be constructed within the thread that is using it.
     #[cfg(feature = "RABBITMQ_CLASSIC")]
     pub channel: Option<amqprs::channel::Channel>,
+
+    /// Not thread-safe. Needs to be constructed within the thread that is using it.
+    #[cfg(feature = "APACHE_KAFKA")]
+    pub producer: Option<
+        rskafka::client::producer::BatchProducer<
+            rskafka::client::producer::aggregator::RecordAggregator,
+        >,
+    >,
+}
+
+impl Clone for StreamPublisherConnection {
+    fn clone(&self) -> StreamPublisherConnection {
+        StreamPublisherConnection {
+            client: self.client.clone(),
+            queue_name: self.queue_name.clone(),
+            #[cfg(feature = "RABBITMQ_CLASSIC")]
+            channel: None,
+            #[cfg(feature = "APACHE_KAFKA")]
+            producer: None,
+        }
+    }
 }

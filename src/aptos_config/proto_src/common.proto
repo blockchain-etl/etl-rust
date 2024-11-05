@@ -1,0 +1,15 @@
+syntax = "proto2";
+
+package aptos.common;
+
+enum Visibility {
+    private = 1;
+    public = 2;
+    friend = 3;
+}
+
+message UnixTimestamp {
+    required int64 seconds = 1;
+    required uint32 nanos = 2;
+}
+

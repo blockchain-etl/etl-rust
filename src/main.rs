@@ -1,35 +1,38 @@
 // Note:  Cargo automated documentation doesn't apply to the main.rs file.  To write documentation
 // for the index of the wiki page, do so in the lib.rs file.
-use actix_web::{get, App, HttpServer, Responder};
-use actix_web_prom::PrometheusMetricsBuilder;
+
+// I wish cargo-fmt sorted these such that all of the actix_web imports could be together...
+#[cfg(feature = "ORCHESTRATED")]
+use actix_web::{web, HttpResponse};
 use clap::{Args, Parser, Subcommand};
-use log::info;
+use log::{error, info};
 use std::error::Error;
+#[cfg(not(feature = "ORCHESTRATED"))]
 use std::fs::{create_dir, read_dir, File};
+#[allow(unused_imports)]
+use std::path::{Path, PathBuf};
+#[cfg(any(feature = "METRICS", feature = "ORCHESTRATED"))]
+use {
+    actix_web::{get, App, HttpServer, Responder},
+    actix_web_prom::PrometheusMetricsBuilder,
+};
+#[cfg(feature = "ORCHESTRATED")]
+use {
+    google_cloud_auth::credentials::CredentialsFile,
+    google_cloud_pubsub::client::{Client, ClientConfig},
+};
+
+use blockchain_etl_indexer::{aptos_config::create_test_data, blockchain_config};
+use blockchain_etl_indexer::{metrics::Metrics, output::publish::StreamPublisher};
+
+#[cfg(not(feature = "ORCHESTRATED"))]
 use std::io::{BufRead, BufReader};
-use std::path::Path;
 
-mod benchmark;
-pub mod constants;
-mod request;
-use blockchain_etl_indexer::metrics::Metrics;
-
-// Get the config associated with the chosen blockchain.  We should import the config as
-// `blockchain_config` so we can use the blockchain configuration generically.
-#[cfg(feature = "SOLANA")]
-use blockchain_etl_indexer::solana_config::lib as blockchain_config;
+/// The directory containing the examples test range
+pub const TEST_EXAMPLE_DIRECTORY: &str = "./tests/examples";
 
 #[cfg(feature = "SOLANA_BIGTABLE")]
 use blockchain_etl_indexer::solana_config::data_sources::bigtable;
-
-// On platforms other than Windows, import the jemallocator library.
-#[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
-
-/// On platforms other than Windows, we use Jemalloc as the global allocator
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 // CLI Parsing information
 #[derive(Parser)]
@@ -42,22 +45,35 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Time (in minutes) to measure the blockchain network's throughput
-    Benchmark { time: u64 },
+    /// Extract using the contents of a Google Pub/Sub message
+    #[cfg(feature = "ORCHESTRATED")]
+    IndexSubscription(IndexSubscriptionArgs),
     /// Extract blocks from a starting index
+    #[cfg(not(feature = "ORCHESTRATED"))]
     IndexRange(IndexRangeArgs),
     /// Extract blocks from a list
+    #[cfg(not(feature = "ORCHESTRATED"))]
     IndexList(IndexListArgs),
+    /// Save range
+    SaveRange(SaveRangeArgs),
+    // Creates a test range
+    CreateTestSet(CreateTestRangeArgs),
 }
 
 /// Arguments relating the the indexing of the crypto currency, particularly output,
 /// start point, and direction (reverse)
+#[cfg(feature = "ORCHESTRATED")]
+#[derive(Args)]
+struct IndexSubscriptionArgs {
+    /// The pub/sub topic to subscribe to.
+    subscription: String,
+}
+
+/// Arguments relating the the indexing of the crypto currency, particularly output,
+/// start point, and direction (reverse)
+#[cfg(not(feature = "ORCHESTRATED"))]
 #[derive(Args)]
 struct IndexRangeArgs {
-    /// OutputType is the object expected to be used to send the data extracted by the Indexer.
-    /// Currently only supporting streaming to a message-passing queue, however in the future we
-    /// may support output to CSV files, json files, or parquet.
-    out: OutputType,
     /// The slot to begin indexing from
     start: u64,
     /// The slot to stop indexing at
@@ -67,33 +83,59 @@ struct IndexRangeArgs {
     reverse: bool,
 }
 
+#[derive(Args)]
+struct SaveRangeArgs {
+    /// The slot to begin indexing from
+    start: u64,
+    /// The slot to stop indexing at
+    end: u64,
+    /// Path to the output directory
+    outdir: PathBuf,
+}
+
+#[derive(Debug, Clone, Args)]
+struct CreateTestRangeArgs {
+    /// The slot to begin indexing from
+    start: u64,
+    /// The slot to stop indexing at
+    end: u64,
+    /// The name
+    name: String,
+    /// Path to the output directory
+    dir: Option<PathBuf>,
+}
+
 /// Arguments relating the the indexing of the crypto currency, particularly output,
 /// start point, and direction (reverse)
+#[cfg(not(feature = "ORCHESTRATED"))]
 #[derive(Args)]
 struct IndexListArgs {
-    /// OutputType is the object expected to be used to send the data extracted by the Indexer.
-    /// Currently only supporting streaming to a message-passing queue, however in the future we
-    /// may support output to CSV files, json files, or parquet.
-    out: OutputType,
     /// The path to a list of blocks to index.
     list: String,
 }
 
-/// The possible output types for the extracted data
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
-enum OutputType {
-    /// Stream the data to a queue (e.g. google pub/sub)
-    Stream,
-}
-
 /// Returns Welcome message when accessing the base-url of the server
+#[cfg(feature = "METRICS")]
 #[get("/")]
 async fn index() -> impl Responder {
     "Welcome to ETL Metrics Server."
 }
 
+/// Liveness check for kubernetes
+#[cfg(feature = "ORCHESTRATED")]
+async fn liveness_probe() -> impl Responder {
+    HttpResponse::Ok().body("Alive")
+}
+
+/// Readiness check for kubernetes
+#[cfg(feature = "ORCHESTRATED")]
+async fn readiness_probe() -> impl Responder {
+    HttpResponse::Ok().body("Ready")
+}
+
 /// Reads in a CSV of u64 values and returns an iterator over the values.
-fn read_block_list_csv(file_path: &Path) -> Box<dyn Iterator<Item = u64>> {
+#[cfg(not(feature = "ORCHESTRATED"))]
+pub fn read_block_list_csv(file_path: &Path) -> Box<dyn Iterator<Item = u64>> {
     // determine if the first line of the csv seems like a header
     let has_headers = {
         let file = File::open(file_path).expect("file exists");
@@ -105,6 +147,7 @@ fn read_block_list_csv(file_path: &Path) -> Box<dyn Iterator<Item = u64>> {
         first_line
             .split(',')
             .all(|field| field.parse::<u64>().is_err())
+            && first_line.trim().parse::<u64>().is_err()
     };
 
     // create the csv reader with the apparent header setting
@@ -140,7 +183,8 @@ fn read_block_list_csv(file_path: &Path) -> Box<dyn Iterator<Item = u64>> {
 }
 
 /// Opens the directory of indexed block numbers and determine where to pick up from.
-fn pick_up_from_previous_range(
+#[cfg(not(feature = "ORCHESTRATED"))]
+pub fn pick_up_from_previous_range(
     start: u64,
     end: Option<u64>,
     is_reverse: bool,
@@ -214,6 +258,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // NOTE: the reqwest docs suggest reusing a single client, rather than using multiple
     // the endpoint and request headers will be the same for every request, so
     // we will clone this request builder, rather than constructing a new one every time.
+    #[cfg(feature = "SOLANA")]
     let request_builder = {
         let endpoint = dotenvy::var("ENDPOINT")
             .expect("ENDPOINT should exist in .env file")
@@ -229,28 +274,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cli = Cli::parse();
 
-    // env:num_extractor_threads = The number of threads to use for extracting data.
-    let num_extractor_threads = dotenvy::var("NUM_EXTRACTOR_THREADS")
-        .expect("NUM_EXTRACTOR_THREADS should exist in .env file")
-        .parse::<usize>()
-        .unwrap();
-
-    // env:enable_metrics = Whether we should be tracking metrics (prometheus connection)
-    let enable_metrics = dotenvy::var("ENABLE_METRICS")
-        .expect("ENABLE_METRICS should exist in .env file")
-        .parse::<bool>()
-        .unwrap();
-
     // metrics setup
     // - Reads in the metrics address and port from the .env file
     // - Sets up th prometheus metrics server
-    let (metrics, srv_handle) = if enable_metrics {
+    #[cfg(feature = "METRICS")]
+    let (metrics, metrics_srv_handle) = {
         let (metrics_address, metrics_port) = {
             // env:metrics_address = Address for connecting to the Prometheus server
-            let metrics_address = dotenvy::var("METRICS_ADDRESS")
-                .expect("METRICS_ADDRESS should exist in .env file")
-                .parse::<String>()
-                .unwrap();
+            let metrics_address = "127.0.0.1";
             // env:metrics_port = Port for connecting to the Prometheus server
             let metrics_port = dotenvy::var("METRICS_PORT")
                 .expect("METRICS_PORT should exist in .env file")
@@ -293,121 +324,150 @@ async fn main() -> Result<(), Box<dyn Error>> {
             request_count,
             failed_request_count,
         };
-        (Some(metrics), Some(srv_handle))
-    } else {
-        (None, None)
+        (Some(metrics), srv_handle)
+    };
+
+    #[cfg(not(feature = "METRICS"))]
+    let metrics = None;
+
+    // Kubernetes needs to be able to make health checks, so we spawn web servers for this here.
+    #[cfg(feature = "ORCHESTRATED")]
+    let health_check_srv_handle = {
+        let health_checks_port = dotenvy::var("HEALTH_CHECKS_PORT")
+            .expect("HEALTH_CHECKS_PORT should exist in .env file")
+            .parse::<String>()
+            .unwrap();
+
+        let health_checks_address = ["0.0.0.0:", &health_checks_port].concat();
+
+        let srv = HttpServer::new(|| {
+            App::new()
+                .route("/healthz", web::get().to(liveness_probe))
+                .route("/ready", web::get().to(readiness_probe))
+        })
+        .bind(health_checks_address)?
+        .run();
+
+        let srv_handle = srv.handle();
+        tokio::task::spawn(srv);
+        srv_handle
     };
 
     match cli.command {
-        Commands::Benchmark { time } => {
-            info!("Benchmarking blockchain network for {} minutes...", time);
-            let throughput = benchmark::get_blockchain_throughput(request_builder, 1).await;
-            info!("Throughput in bytes per second: {}", throughput);
-            return Ok(());
+        #[cfg(feature = "ORCHESTRATED")]
+        Commands::IndexSubscription(args) => {
+            let subscription_arg = args.subscription;
+
+            let gcp_config = match dotenvy::var("GOOGLE_APPLICATION_CREDENTIALS") {
+                Ok(env_var) => {
+                    let key_path = env_var.parse::<String>().unwrap();
+                    let cred_file = CredentialsFile::new_from_file(key_path.to_owned())
+                        .await
+                        .expect("GCP credentials file exists");
+                    // authenticate using the key file
+                    ClientConfig::default()
+                        .with_credentials(cred_file)
+                        .await
+                        .unwrap()
+                }
+                Err(_) => ClientConfig::default().with_auth().await.unwrap(),
+            };
+
+            // Attempt to create the client using the configuration from above
+            let gcp_client = Client::new(gcp_config).await.unwrap();
+            let subscription = gcp_client.subscription(&subscription_arg);
+
+            let publisher = StreamPublisher::new().await;
+
+            let cur_publisher = publisher.clone();
+
+            blockchain_config::subscribe_and_extract(subscription, cur_publisher, metrics)
+                .await
+                .unwrap();
+
+            #[cfg(feature = "REQUIRES_DISCONNECT")]
+            publisher.disconnect().await;
         }
+        #[cfg(not(feature = "ORCHESTRATED"))]
         Commands::IndexRange(args) => {
             if args.start == 0 && args.end.is_none() && args.reverse {
                 panic!("FATAL: cannot index backwards from genesis");
             }
-            let (start, opt_end) = pick_up_from_previous_range(args.start, args.end, args.reverse);
+            /*
+                        let (start, opt_end) = pick_up_from_previous_range(args.start, args.end, args.reverse);
 
-            #[allow(clippy::collapsible_else_if)]
-            let indexing_range: Box<dyn Iterator<Item = u64>> = if args.reverse {
-                if let Some(end) = opt_end {
-                    Box::new((start..end).rev())
-                } else {
-                    Box::new((0..start).rev())
-                }
-            } else {
-                if let Some(end) = opt_end {
-                    Box::new(start..end)
-                } else {
-                    Box::new(start..)
-                }
-            };
+                        #[allow(clippy::collapsible_else_if)]
+                        let indexing_range: Box<dyn Iterator<Item = u64>> = if args.reverse {
+                            if let Some(end) = opt_end {
+                                Box::new((start..end).rev())
+                            } else {
+                                Box::new((0..start).rev())
+                            }
+                        } else {
+                            if let Some(end) = opt_end {
+                                Box::new(start..end)
+                            } else {
+                                Box::new(start..)
+                            }
+                        };
+            */
+            let publisher = StreamPublisher::new().await;
 
-            match args.out {
-                OutputType::Stream => {
-                    let publisher =
-                        blockchain_etl_indexer::output::publish::StreamPublisher::new().await;
+            let cur_publisher = publisher.clone();
 
-                    let cur_publisher = publisher.clone();
-                    #[cfg(not(feature = "SOLANA_BIGTABLE"))]
-                    let bigtable = None;
-                    #[cfg(feature = "SOLANA_BIGTABLE")]
-                    let bigtable = {
-                        let _bigtable = bigtable::connect_to_bigtable().await;
-                        match _bigtable {
-                            Ok(bt) => Some(bt),
-                            Err(e) => panic!("Failed to connect to bigtable {:?}", e),
-                        }
-                    };
-                    blockchain_config::extract(
-                        indexing_range,
-                        request_builder,
-                        bigtable,
-                        num_extractor_threads,
-                        cur_publisher,
-                        metrics,
-                    )
-                    .await
-                    .unwrap();
+            blockchain_config::extract_range(
+                args.start,
+                args.end.unwrap(),
+                cur_publisher,
+                metrics,
+                None,
+            )
+            .await
+            .unwrap();
 
-                    #[cfg(not(any(feature = "JSON", feature = "JSONL")))]
-                    publisher.disconnect().await;
-                }
-            }
+            #[cfg(feature = "REQUIRES_DISCONNECT")]
+            publisher.disconnect().await;
         }
-        Commands::IndexList(args) => {
-            let list_arg = args.list;
-            let list_path = Path::new(&list_arg);
-            let indexing_list = if list_path.exists() {
-                // read the slots in from the csv file at the path
-                read_block_list_csv(list_path)
-            } else {
-                panic!("Please pass a valid file path for the block list.");
-            };
-
-            //let debug_list: Vec<u64> = indexing_list.collect();
-            //dbg!(debug_list);
-
-            match args.out {
-                OutputType::Stream => {
-                    let publisher =
-                        blockchain_etl_indexer::output::publish::StreamPublisher::new().await;
-                    let cur_publisher = publisher.clone();
-                    #[cfg(not(feature = "SOLANA_BIGTABLE"))]
-                    let bigtable = None;
-                    #[cfg(feature = "SOLANA_BIGTABLE")]
-                    let bigtable = {
-                        let _bigtable = bigtable::connect_to_bigtable().await;
-                        match _bigtable {
-                            Ok(bt) => Some(bt),
-                            Err(e) => panic!("Failed to connect to bigtable {:?}", e),
-                        }
-                    };
-
-                    blockchain_config::extract(
-                        indexing_list,
-                        request_builder,
-                        bigtable,
-                        num_extractor_threads,
-                        cur_publisher,
-                        metrics,
-                    )
-                    .await
-                    .unwrap();
-
-                    #[cfg(not(any(feature = "JSON", feature = "JSONL")))]
-                    publisher.disconnect().await;
+        #[cfg(not(feature = "ORCHESTRATED"))]
+        Commands::IndexList(_) => {
+            unreachable!("IndexList not supported")
+        }
+        Commands::SaveRange(args) => {
+            match blockchain_config::extract_txs(args.start, args.end, Some(args.outdir.clone()))
+                .await
+            {
+                Ok(_) => info!(
+                    "Successfully saved [{}, {}] to {:?}",
+                    args.start, args.end, args.outdir
+                ),
+                Err(error) => {
+                    error!(
+                        "Failed to save range [{},{}] due to error: {:?}",
+                        args.start, args.end, error
+                    );
+                    panic!(
+                        "Failed to save range [{},{}] due to error: {:?}",
+                        args.start, args.end, error
+                    );
                 }
+            };
+        }
+        Commands::CreateTestSet(args) => {
+            let pdir = args.dir.unwrap_or(TEST_EXAMPLE_DIRECTORY.into());
+            let dir = pdir.join(format!("{}_{}_{}", &args.name, &args.start, &args.end));
+
+            match create_test_data(args.start, args.end, &dir, None).await {
+                Ok(()) => info!("Created test data: {:?}", dir),
+                Err(err) => error!("Failed to create test data: {}", err),
             }
         }
     }
 
-    if enable_metrics {
-        srv_handle.unwrap().stop(false).await;
-    }
+    #[cfg(feature = "ORCHESTRATED")]
+    health_check_srv_handle.stop(false).await;
+
+    #[cfg(feature = "METRICS")]
+    metrics_srv_handle.stop(false).await;
 
     Ok(())
 }

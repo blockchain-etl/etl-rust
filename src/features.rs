@@ -5,35 +5,34 @@
 ///
 /// Feature contradiction / requirements should be added to this module as they are created.
 
+#[cfg(all(feature = "RPC", feature = "REST"))]
+compile_error!("Features `RPC` and `REST` are mutually exclusive. Please select only one.");
+
 // Choosing the output publisher
-
-#[cfg(all(feature = "GOOGLE_PUBSUB", feature = "RABBITMQ_STREAM"))]
-compile_error!("Features `GOOGLE_PUBSUB` and `RABBITMQ_STREAM` are mutually exclusive. Please select only one.");
-
-#[cfg(all(feature = "GOOGLE_PUBSUB", feature = "RABBITMQ_CLASSIC"))]
-compile_error!("Features `GOOGLE_PUBSUB` and `RABBITMQ_CLASSIC` are mutually exclusive. Please select only one.");
-
-#[cfg(all(feature = "RABBITMQ_CLASSIC", feature = "RABBITMQ_STREAM"))]
-compile_error!("Features `RABBITMQ_CLASSIC` and `RABBITMQ_STREAM` are mutually exclusive. Please select only one.");
-
 #[cfg(not(any(
+    feature = "APACHE_KAFKA",
     feature = "GOOGLE_PUBSUB",
+    feature = "GOOGLE_CLOUD_STORAGE",
     feature = "RABBITMQ_STREAM",
     feature = "RABBITMQ_CLASSIC",
     feature = "JSONL",
     feature = "JSON"
 )))]
-compile_error!("Either `JSONL`, `JSON`, `GOOGLE_PUBSUB`, `RABBITMQ_STREAM`, or `RABBITMQ_CLASSIC` must be enabled.");
+compile_error!("Either `JSONL`, `JSON`, `GOOGLE_PUBSUB`, `GOOGLE_CLOUD_STORAGE`, `APACHE_KAFKA`, `RABBITMQ_STREAM`, or `RABBITMQ_CLASSIC` must be enabled.");
+
+#[cfg(not(any(feature = "INT_TIMESTAMP", feature = "STRING_TIMESTAMP",)))]
+compile_error!("Either `INT_TIMESTAMP` or `STRING_TIMESTAMP` must be enabled.");
 
 // Makes sure we either have one or multiple publishers
-
 #[cfg(all(feature = "SINGLE_PUBLISHER", feature = "SEPARATE_PUBLISHERS"))]
 compile_error!("Features `SINGLE_PUBLISHER` and `SEPARATE_PUBLISHERS` are mutually exclusive.  Please select only one.");
 
 #[cfg(not(any(feature = "SINGLE_PUBLISHER", feature = "SEPARATE_PUBLISHERS")))]
 compile_error!("Either `SINGLE_PUBLISHER` or `SEPARATE_PUBLISHERS` must be enabled");
 
-// for now, solana is the only supported blockchain.
-// in the future, this check should be implemented for all supported blockchains.
-#[cfg(not(feature = "SOLANA"))]
-compile_error!("No blockchain feature has been enabled. Please select one, such as `SOLANA`.");
+#[cfg(not(any(feature = "SOLANA", feature = "APTOS")))]
+compile_error!(
+    "No blockchain feature has been enabled. Please select one, such as `SOLANA`, `APTOS`."
+);
+#[cfg(all(feature = "SOLANA", feature = "APTOS"))]
+compile_error!("Multiple blockchain features have been enabled. Please select only one, such as `SOLANA`, `APTOS`.");

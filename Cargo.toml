@@ -1,19 +1,20 @@
 [package]
 name = "blockchain_etl_indexer"
-version = "1.0.0"
+version = "0.0.1"
 edition = "2021"
 build = "build_proto.rs"
 
 [dependencies]
 futures = "0.3.29"
+futures-util = "0.3.30"
 chrono = "0.4.31"
 actix-web = "4.3.0"
-prometheus = "0.13.3"
 actix-web-prom = "0.7.0"
 prost = "0.12.1"
 prost-build = { version = "0.12.1" }
 zstd = "0.12.3"
 tokio = { version = "1.34.0", features = ["full", "signal"] }
+tokio-util = "0.7.10"
 reqwest = { version = "0.11.22", features = ["json"] }
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.99"
@@ -29,8 +30,15 @@ ctrlc = "3.4.1"
 dotenvy = "0.15.7"
 base64 = "0.21.5"
 borsh = "0.10.3"
+hex = "0.4"
+
+# METRICS
+prometheus = { version = "0.13.3", optional = true }
 
 # PUBLISHERS
+#   Apache Kafka
+rskafka = { version = "0.5.0", optional = true }
+
 #   RabbitMQ Classic
 amqprs = { version = "1.4.0", optional = true }
 
@@ -38,9 +46,13 @@ amqprs = { version = "1.4.0", optional = true }
 rabbitmq-stream-client = { version = "0.4.0", optional = true }
 
 #   Google Pub/Sub
-google-cloud-pubsub = { version = "0.20.0", optional = true }
-google-cloud-googleapis = { version = "0.11.0", optional = true }
-google-cloud-auth = { version = "0.12.0", optional = true }
+google-cloud-pubsub = { version = "0.22.0", optional = true }
+google-cloud-googleapis = { version = "0.12.0", optional = true }
+google-cloud-auth = { version = "0.13.0", optional = true }
+google-cloud-gax = "0.17.0"
+
+#   Google Cloud Storage
+google-cloud-storage = { version = "0.15.0", optional = true }
 
 #   JSONL
 prost-reflect = { version = "0.12.0", optional = true, features = ["serde"] }
@@ -50,35 +62,65 @@ prost-reflect = { version = "0.12.0", optional = true, features = ["serde"] }
 
 # BLOCKCHAIN-SPECIFIC
 #   SOLANA DEPENDENCIES
-solana-sdk = { version = "1.16", optional = true }
-solana-program = { version = "1.16", optional = true }
-solana-transaction-status = { version = "1.16", optional = true }
-solana-account-decoder = { version = "1", optional = true }
-solana-storage-bigtable = { version = "1", optional = true }
-mpl-token-metadata = "3.0.1"
+# solana-sdk = { version = "1.16", optional = true }
+# solana-transaction-status = { version = "1.16", optional = true }
+# solana-account-decoder = { version = "1", optional = true }
+# solana-storage-bigtable = { version = "1", optional = true }
+# mpl-token-metadata = "3.0.1"
 
-# NON-WINDOWS
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.5.4"
+#   APTOS DEPENDENCIES
+aptos-protos = { git = "https://github.com/aptos-labs/aptos-core.git", rev = "5c48aee129b5a141be2792ffa3d9bd0a1a61c9cb", optional = true }
+processor = { git = "https://github.com/aptos-labs/aptos-indexer-processors.git", tag = "aptos-indexer-processors-v1.15.5", optional = true }
+# processor = { path = "src/aptos_config/aptos-core/ecosystem/indexer-grpc/indexer-grpc-parser/aptos-indexer-processors/rust/processor", optional = true }
+# processor = { path = "src/aptos_config/aptos-indexer-processors/rust/processor", optional = true }
+
+tonic = { version = "0.11.0", features = [
+    "tls",
+    "tls-roots",
+    "transport",
+    "prost",
+    "gzip",
+    "codegen",
+    "zstd",
+], optional = true }
+url = { version = "2.5.0", optional = true }
+once_cell = "1.19.0"
 
 [build-dependencies]
 prost-build = { version = "0.12.1" }
+log = "0.4.21"
+env_logger = "0.11.3"
 
 [profile.release]
 lto = true
 
 [features]
-default = ["SEPARATE_PUBLISHERS"]
-# Solana features
-SOLANA_BIGTABLE = ["SOLANA", "dep:solana-storage-bigtable"]
-SOLANA = [
-    "RPC",
+default = [
+    "APTOS",
+    "SEPARATE_PUBLISHERS",
+    "METRICS",
+    "APTOS_GRPC",
+    "ORCHESTRATED",
+    #"JSONL",
+]
+
+METRICS = ["dep:prometheus"]
+
+ORCHESTRATED = [
+    "dep:google-cloud-pubsub",
+    "dep:google-cloud-googleapis",
+    "dep:google-cloud-auth",
+]
+
+APTOS_GRPC = ["dep:url", "dep:tonic"]
+
+# Aptos features
+APTOS = [
+    "SEPARATE_PUBLISHERS",
+    "REST",
     "CUSTOM_INDEXING",
-    "dep:solana-sdk",
-    "dep:solana-program",
-    "dep:solana-transaction-status",
-    "dep:solana-account-decoder",
-    "dep:solana-storage-bigtable",
+    "dep:aptos-protos",
+    "dep:processor",
 ]
 
 # Single vs Separate publishers
@@ -86,19 +128,41 @@ SINGLE_PUBLISHER = ["STREAM"]
 SEPARATE_PUBLISHERS = ["STREAM"]
 
 # Publisher selection
+APACHE_KAFKA = ["STREAM", "INT_TIMESTAMP", "dep:rskafka"]
 GOOGLE_PUBSUB = [
     "STREAM",
+    "REQUIRES_DISCONNECT",
     "STRING_TIMESTAMP",
     "dep:google-cloud-pubsub",
     "dep:google-cloud-googleapis",
     "dep:google-cloud-auth",
 ]
-RABBITMQ_STREAM = ["STREAM", "INT_TIMESTAMP", "dep:rabbitmq-stream-client"]
-RABBITMQ_CLASSIC = ["STREAM", "INT_TIMESTAMP", "dep:amqprs"]
-JSONL = ["dep:prost-reflect", "STRING_TIMESTAMP", "PUBLISH_WITH_NAME"]
-JSON = ["dep:prost-reflect", "STRING_TIMESTAMP", "PUBLISH_WITH_NAME"]
+GOOGLE_CLOUD_STORAGE = [
+    "STREAM",
+    "STRING_TIMESTAMP",
+    "PUBLISH_WITH_NAME",
+    "dep:google-cloud-storage",
+    "dep:google-cloud-googleapis",
+    "dep:google-cloud-auth",
+]
+RABBITMQ_STREAM = [
+    "STREAM",
+    "INT_TIMESTAMP",
+    "REQUIRES_DISCONNECT",
+    "dep:rabbitmq-stream-client",
+]
+RABBITMQ_CLASSIC = [
+    "STREAM",
+    "INT_TIMESTAMP",
+    "REQUIRES_DISCONNECT",
+    "dep:amqprs",
+]
+JSONL = ["STRING_TIMESTAMP", "PUBLISH_WITH_NAME", "dep:prost-reflect"]
+JSON = ["STRING_TIMESTAMP", "PUBLISH_WITH_NAME", "dep:prost-reflect"]
+
 STREAM = []
 PUBLISH_WITH_NAME = []
+REQUIRES_DISCONNECT = []
 
 # Use an ISO string, or the number of milliseconds since the UNIX epoch for timestamps
 STRING_TIMESTAMP = []
@@ -106,6 +170,7 @@ INT_TIMESTAMP = []
 
 # Call features
 RPC = []
+REST = []
 
 # Whether we have a more custom indexing functionality
 CUSTOM_INDEXING = []
