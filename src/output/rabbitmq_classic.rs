@@ -4,6 +4,7 @@
 //! to connect and publish to the RabbitMQ Classic (not to be
 //! confused with RabbitMQ Stream)
 
+use super::environment::*;
 use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient};
 use log::info;
 use prost::Message;
@@ -18,30 +19,14 @@ use prost::Message;
 /// - `RABBITMQ_PASSWORD`
 pub async fn connect(queue_name: &str) -> StreamPublisherConnection {
     // Extract necessary information from the .env from the queue
-    let address = dotenvy::var("RABBITMQ_ADDRESS")
-        .expect("RABBITMQ_ADDRESS should exist in .env file")
-        .parse::<String>()
-        .unwrap();
-    let port = dotenvy::var("RABBITMQ_PORT")
-        .expect("RABBITMQ_PORT should exist in .env file")
-        .parse::<u16>()
-        .unwrap();
-    let user = dotenvy::var("RABBITMQ_USER")
-        .expect("RABBITMQ_USER should exist in .env file")
-        .parse::<String>()
-        .unwrap();
-    let password = dotenvy::var("RABBITMQ_PASSWORD")
-        .expect("RABBITMQ_PASSWORD should exist in .env file")
-        .parse::<String>()
-        .unwrap();
-    let rabbitmq_queue_name = dotenvy::var(queue_name)
-        .unwrap_or_else(|_| panic!("{} should exist in .env file", queue_name))
-        .parse::<String>()
-        .unwrap();
+    let address = get_rabbitmq_addr();
+    let port = get_rabbitmq_port();
+    let user = get_rabbitmq_username();
+    let password = get_rabbitmq_password();
 
     info!("Creating rabbitmq environment...");
     let connection = amqprs::connection::Connection::open(
-        &amqprs::connection::OpenConnectionArguments::new(&address, port, &user, &password),
+        &amqprs::connection::OpenConnectionArguments::new(address, *port, user, password),
     )
     .await
     .expect("rabbitmq server has been setup");
@@ -49,6 +34,11 @@ pub async fn connect(queue_name: &str) -> StreamPublisherConnection {
     connection
         .register_callback(amqprs::callbacks::DefaultConnectionCallback)
         .await
+        .unwrap();
+
+    let rabbitmq_queue_name = dotenvy::var(queue_name)
+        .unwrap_or_else(|_| panic!("{} should exist in .env file", queue_name))
+        .parse::<String>()
         .unwrap();
 
     StreamPublisherConnection {

@@ -15,15 +15,13 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 
+use super::environment::*;
 use super::publish::{StreamPublisherConnection, StreamPublisherConnectionClient};
 
 /// Opens the connection to a JSONL file.
 pub async fn connect(queue_env: &str) -> StreamPublisherConnection {
     // Get expected output directory as a string
-    let output_dir_string = dotenvy::var("OUTPUT_DIR")
-        .expect("OUTPUT_DIR should exist in .env file")
-        .parse::<String>()
-        .unwrap();
+    let output_dir_string = get_output_dir();
 
     // transform it into a path object
     let mut output_dir = PathBuf::new();
@@ -57,6 +55,7 @@ impl StreamPublisherConnectionClient {
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
+            .truncate(true)
             .open(filepath)
             .expect("Failed to open file");
         let json = serde_json::to_string::<T>(&msg).unwrap();
